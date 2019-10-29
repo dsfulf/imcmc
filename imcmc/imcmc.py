@@ -74,7 +74,8 @@ class ImageLikelihood(theano.Op):
             output_storage[0][0] = np.log(self.density(x, y))[0]
 
 
-def sample_grayscale(image, samples=5000, tune=100, nchains=4, threshold=0.2):
+def sample_grayscale(image, samples=5000, tune=100, nchains=4, threshold=0.2,
+                     cores=1,  **kwargs):
     """Run MCMC on a 1 color image. Works best on logos or text.
 
     Parameters
@@ -99,6 +100,13 @@ def sample_grayscale(image, samples=5000, tune=100, nchains=4, threshold=0.2):
         this will do that. Use `None` to not binarize. In theory you should get
         fewer samples from lighter areas, but your mileage may vary.
 
+    cores : int
+        Number of CPU cores to utilize. Windows machines may need to use
+        default value of 1.
+
+    kwargs :
+        Other keyword arguments passed to `pm.sample()`.
+
     Returns
     -------
     pymc3.MultiTrace of samples from the image. Each sample is an (x, y) float
@@ -118,14 +126,16 @@ def sample_grayscale(image, samples=5000, tune=100, nchains=4, threshold=0.2):
     with pm.Model():
         pm.DensityDist('image', ImageLikelihood(image_copy), shape=2)
         trace = pm.sample(samples,
+                          cores=cores,
                           tune=tune,
                           chains=nchains, step=pm.Metropolis(),
                           start=[{'image': x} for x in start],
+                          **kwargs
                          )
     return trace
 
 
-def sample_color(image, samples=5000, tune=1000, nchains=4):
+def sample_color(image, samples=5000, tune=1000, nchains=4, cores=1, **kwargs):
     """Run MCMC on a color image. EXPERIMENTAL!
 
     Parameters
@@ -140,6 +150,18 @@ def sample_color(image, samples=5000, tune=1000, nchains=4):
         All chains start at the same spot, so it is good to let them wander
         apart a bit before beginning
 
+    nchains : int
+        Number of chains to sample with. This will later turn into the number
+        of colors in your plot. Note that you get `samples * nchains` of total
+        points in your final scatter.
+
+    cores : int
+        Number of CPU cores to utilize. Windows machines may need to use
+        default value of 1.
+
+    kwargs :
+        Other keyword arguments passed to `pm.sample()`.
+
     Returns
     -------
     pymc3.MultiTrace of samples from the image. Each sample is an (x, y) float
@@ -152,7 +174,7 @@ def sample_color(image, samples=5000, tune=1000, nchains=4):
         pm.DensityDist('green', ImageLikelihood(image[:, :, 1]), shape=2)
         pm.DensityDist('blue', ImageLikelihood(image[:, :, 2]), shape=2)
 
-        trace = pm.sample(samples, chains=nchains, tune=tune, step=pm.Metropolis())
+        trace = pm.sample(samples, cores=cores, chains=nchains, tune=tune, step=pm.Metropolis())
     return trace
 
 
@@ -207,7 +229,7 @@ def plot_multitrace(trace, image, max_size=10, colors=None, **plot_kwargs):
 
 def make_gif(trace, image, steps=200, leading_point=True,
              filename='output.gif', max_size=10, interval=30, dpi=20,
-             colors=None, **plot_kwargs):
+             blit=True, colors=None, repeat_delay=3000, **plot_kwargs):
     """Make a gif of the grayscale trace.
 
     Parameters
@@ -233,14 +255,20 @@ def make_gif(trace, image, steps=200, leading_point=True,
         In inches!
 
     interval : int
-        How long each frame lasts. Pretty sure this is hundredths of seconds
+        How long each frame lasts in milliseconds.
 
     dpi : int
         Quality of the resulting .gif Seems like larger values make the gif
         bigger too.
 
+    blit : bool
+        Use blitting to only draw updated pixels.
+
     colors : iterable
         You can set custom colors to cycle through! Default is the rainbow.
+
+    repeat_delay : int
+        Number of milliseconds after last frame before restarting the animation.
 
     plot_kwargs :
         Other keyword arguments passed to the trace plotting. Some useful
@@ -255,6 +283,8 @@ def make_gif(trace, image, steps=200, leading_point=True,
     """
     default_kwargs = {'marker': 'o', 'linestyle': '', 'alpha': 0.4}
     default_kwargs.update(plot_kwargs)
+    ms = default_kwargs.get('markersize', '20')
+    ms = default_kwargs.get('ms', ms)
     if colors is None:
         colors = get_rainbow()
     else:
@@ -271,11 +301,19 @@ def make_gif(trace, image, steps=200, leading_point=True,
 
     lines, points = [], []
     for _ in vals:
-        lines.append(ax.plot([], [], **default_kwargs)[0])
+        lines.append(ax.plot([], [], animated=True, **default_kwargs)[0])
         if leading_point:
-            points.append(ax.plot([], [], 'o', c=lines[-1].get_color(), markersize=20)[0])   # noqa
+            points.append(ax.plot([], [], 'o', c=lines[-1].get_color(), markersize=ms,
+                                  animated=True)[0])   # noqa
         else:
             points.append(None)
+
+    def init():
+        for pts, lns in zip(points, lines):
+            lns.set_data([], [])
+            pts.set_data([], [])
+
+        return (*lines, *points)
 
     def update(idx):
         if idx < len(intervals):
@@ -287,9 +325,10 @@ def make_gif(trace, image, steps=200, leading_point=True,
             for pts in points:
                 pts.set_data([], [])
 
-        return ax
+        return (*lines, *points)
 
-    anim = FuncAnimation(fig, update, frames=np.arange(steps + 20), interval=interval)   # noqa
+    anim = FuncAnimation(fig, update, init_func=init, frames=np.arange(steps + 20),
+                         interval=interval, blit=blit, repeat_delay=repeat_delay)   # noqa
     anim.save(filename, dpi=dpi, writer='imagemagick')
     return filename
 
@@ -381,7 +420,7 @@ def make_color_gif(trace, image, blur=8, steps=200, max_size=10, filename='outpu
         Place to save the resulting .gif to
 
     interval : int
-        How long each frame lasts. Pretty sure this is hundredths of seconds
+        How long each frame lasts in milliseconds.
 
     dpi : int
         Quality of the resulting .gif Seems like larger values make the gif

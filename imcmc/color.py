@@ -3,6 +3,7 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
+import matplotlib.animation as animation
 import scipy.stats as st
 
 
@@ -68,7 +69,71 @@ class ImageLines:
 
         for spine in ax.spines.values():
             spine.set_visible(False)
+
         return fig, ax
+
+    def animate(self, filename, frames=100, n_points=1000, linewidth=2, ax=None,
+                interval=10, blit=True, dpi=20, **anim_kwargs):
+        """Build an animation of the drawing process.
+
+        Parameters
+        ----------
+        filename : str
+            Place to save the resulting .gif to.
+
+        frames : int
+            Number of frames of the resulting .gif.
+
+        n_points : int
+            Passed through to `ImageLines.plot()`.
+
+        linewidth : int
+            Passed through to `ImageLines.plot()`.
+
+        ax : int
+            Passed through to `ImageLines.plot()`.
+
+        interval : int
+            How long each frame lasts in milliseconds.
+
+        blit : bool
+            Use blitting to optimize drawing.
+
+        dpi : int
+            Quality of the resulting .gif.
+
+        kwargs :
+            Other keyword arguments passed to `pm.sample()`.
+
+        Returns
+        -------
+        str
+            filename where the gif was saved
+        """
+        fig, ax = self.plot(n_points, linewidth, ax)
+        lines = ax.collections[0]
+        segments = lines.get_segments()
+
+        step = len(segments) // frames
+
+        ax.set_xlim(0, self.image.shape[1])
+        ax.set_ylim(0, self.image.shape[0])
+        ax.yaxis.set_visible(False)
+        ax.xaxis.set_visible(False)
+
+        def init():
+            lines.set_segments([])
+            return lines,
+
+        def update(idx):
+            idx = idx * step
+            lines.set_segments(segments[0:idx])
+            return lines,
+
+        anim = animation.FuncAnimation(fig, update, init_func=init, frames=frames,
+                                       interval=interval, blit=blit, **anim_kwargs)
+        anim.save(filename, dpi=dpi, writer='imagemagick')
+        return filename
 
 
 class UniformPathStrategy:
