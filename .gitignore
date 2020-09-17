@@ -6,3 +6,6 @@
 htmlcov/
 .DS_Store
 .ipynb_checkpoints/
+.ipynb
+.vscode
+.mypy_cache
