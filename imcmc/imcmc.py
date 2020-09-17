@@ -1,16 +1,20 @@
-from cycler import cycler
+from cycler import Cycler, cycler
+from matplotlib.axes import Axes
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from matplotlib.pyplot import axes
 import numpy as np
 from PIL import Image
 import pymc3 as pm
-import theano
+import theano  # type: ignore
 import theano.tensor as tt
 from tqdm import tqdm
 import scipy
 
+from typing import Tuple
 
-def get_rainbow():
+
+def get_rainbow() -> Cycler:
     """Creates a rainbow color cycle"""
     return cycler('color', [
         '#FF0000',
@@ -23,7 +27,7 @@ def get_rainbow():
     ])
 
 
-def load_image(image_file, mode=None):
+def load_image(image_file, mode=None) -> np.ndarray:
     """Load filename into a numpy array, filling in transparency with 0's.
 
     Parameters
@@ -75,7 +79,7 @@ class ImageLikelihood(theano.Op):
 
 
 def sample_grayscale(image, samples=5000, tune=100, nchains=4, threshold=0.2,
-                     cores=1,  **kwargs):
+                     cores=1, **kwargs) -> pm.backend.base.MultiTrace:
     """Run MCMC on a 1 color image. Works best on logos or text.
 
     Parameters
@@ -119,7 +123,8 @@ def sample_grayscale(image, samples=5000, tune=100, nchains=4, threshold=0.2,
         image_copy[image >= threshold] = 1
 
     # need an active pixel to start on
-    active_pixels = np.array(list(zip(*np.where(image_copy == image_copy.max()))))
+    active_pixels = np.array(
+        list(zip(*np.where(image_copy == image_copy.max()))))
     idx = np.random.randint(0, len(active_pixels), nchains)
     start = active_pixels[idx]
 
@@ -131,11 +136,12 @@ def sample_grayscale(image, samples=5000, tune=100, nchains=4, threshold=0.2,
                           chains=nchains, step=pm.Metropolis(),
                           start=[{'image': x} for x in start],
                           **kwargs
-                         )
+                          )
     return trace
 
 
-def sample_color(image, samples=5000, tune=1000, nchains=4, cores=1, **kwargs):
+def sample_color(image, samples=5000, tune=1000, nchains=4, cores=1, **kwargs
+        ) -> pm.backend.base.MultiTrace:
     """Run MCMC on a color image. EXPERIMENTAL!
 
     Parameters
@@ -174,11 +180,13 @@ def sample_color(image, samples=5000, tune=1000, nchains=4, cores=1, **kwargs):
         pm.DensityDist('green', ImageLikelihood(image[:, :, 1]), shape=2)
         pm.DensityDist('blue', ImageLikelihood(image[:, :, 2]), shape=2)
 
-        trace = pm.sample(samples, cores=cores, chains=nchains, tune=tune, step=pm.Metropolis())
+        trace = pm.sample(samples, cores=cores, chains=nchains,
+                          tune=tune, step=pm.Metropolis())
     return trace
 
 
-def plot_multitrace(trace, image, max_size=10, colors=None, **plot_kwargs):
+def plot_multitrace(trace, image, max_size=10, colors=None, **plot_kwargs
+        ) -> Tuple[plt.Figure, plt.axes.Axes]:
     """Plot an image of the grayscale trace.
 
     Parameters
@@ -229,7 +237,7 @@ def plot_multitrace(trace, image, max_size=10, colors=None, **plot_kwargs):
 
 def make_gif(trace, image, steps=200, leading_point=True,
              filename='output.gif', max_size=10, interval=30, dpi=20,
-             blit=True, colors=None, repeat_delay=3000, **plot_kwargs):
+             blit=True, colors=None, repeat_delay=3000, **plot_kwargs) -> FuncAnimation:
     """Make a gif of the grayscale trace.
 
     Parameters
@@ -281,10 +289,11 @@ def make_gif(trace, image, steps=200, leading_point=True,
     str
         filename where the gif was saved
     """
-    default_kwargs = {'marker': 'o', 'linestyle': '', 'alpha': 0.4}
-    default_kwargs.update(plot_kwargs)
-    ms = default_kwargs.get('markersize', '20')
-    ms = default_kwargs.get('ms', ms)
+    kwargs = {'marker': '', 'linestyle': '', 'alpha': 0.4, 'markersize': '10'}
+    kwargs.update(plot_kwargs)
+    kwargs.setdefault('ms', kwargs.pop('markersize'))
+    ms = kwargs['ms']
+
     if colors is None:
         colors = get_rainbow()
     else:
@@ -301,10 +310,9 @@ def make_gif(trace, image, steps=200, leading_point=True,
 
     lines, points = [], []
     for _ in vals:
-        lines.append(ax.plot([], [], animated=True, **default_kwargs)[0])
+        lines.append(ax.plot([], [], animated=True, **kwargs)[0])
         if leading_point:
-            points.append(ax.plot([], [], 'o', c=lines[-1].get_color(), markersize=ms,
-                                  animated=True)[0])   # noqa
+            points.append(ax.plot([], [], 'o', c=lines[-1].get_color(), markersize=ms, animated=True)[0])   # noqa
         else:
             points.append(None)
 
@@ -320,7 +328,8 @@ def make_gif(trace, image, steps=200, leading_point=True,
             for pts, lns, val in zip(points, lines, vals):
                 lns.set_data(val[:intervals[idx], 1], val[:intervals[idx], 0])
                 if leading_point:
-                    pts.set_data(val[intervals[idx], 1], val[intervals[idx], 0])
+                    pts.set_data(val[intervals[idx], 1],
+                                 val[intervals[idx], 0])
         elif idx == len(intervals) and leading_point:
             for pts in points:
                 pts.set_data([], [])
@@ -329,17 +338,25 @@ def make_gif(trace, image, steps=200, leading_point=True,
 
     anim = FuncAnimation(fig, update, init_func=init, frames=np.arange(steps + 20),
                          interval=interval, blit=blit, repeat_delay=repeat_delay)   # noqa
-    anim.save(filename, dpi=dpi, writer='imagemagick')
-    return filename
+
+    if filename.split('.')[-1] == 'mp4':
+        writer = 'ffmpeg'
+        extra_args = []  # ['-r', f'{15:0d}']
+    else:
+        writer = 'imagemagick'
+        extra_args = ['-layers', 'Optimize']
+
+    anim.save(filename, dpi=dpi, writer=writer, extra_args=extra_args)
+    return anim
 
 
-def get_figsize(image, max_size=10):
+def get_figsize(image, max_size=10) -> Tuple[float, float]:
     """Helper to scale figures"""
     scale = max_size / max(image.shape)
     return (scale * image.shape[1], scale * image.shape[0])
 
 
-def _process_image_trace(trace, image, blur):
+def _process_image_trace(trace, image, blur) -> List[np.ndarray]:
     """Adds Gaussian blur"""
     w, h = image.shape[:2]
     colors = ('red', 'green', 'blue')
@@ -351,7 +368,7 @@ def _process_image_trace(trace, image, blur):
     return [scipy.ndimage.filters.gaussian_filter(channel, blur) for channel in channels]   # noqa
 
 
-def plot_multitrace_color(trace, image, blur=8, channel_max=None):
+def plot_multitrace_color(trace, image, blur=8, channel_max=None) -> Image:
     """Plot the trace from a color image
 
     Does additive blending of the three channels using Pillow. Higher `blur`
@@ -383,12 +400,13 @@ def plot_multitrace_color(trace, image, blur=8, channel_max=None):
 
     pils = []
     for channel, c_max in zip(smoothed, channel_max):
-        pils.append(Image.fromarray(np.uint8(255 * np.flipud(channel / c_max))))
+        pils.append(Image.fromarray(
+            np.uint8(255 * np.flipud(channel / c_max))))
     return Image.merge('RGB', pils)
 
 
 def make_color_gif(trace, image, blur=8, steps=200, max_size=10, filename='output.gif',
-                   interval=30, dpi=20):
+                   interval=30, dpi=20) -> FuncAnimation:
     """Make a gif of the color trace. SUPER EXPERIMENTAL!
 
     Tries to grab portions of the trace from
@@ -450,4 +468,4 @@ def make_color_gif(trace, image, blur=8, steps=200, max_size=10, filename='outpu
 
         anim = FuncAnimation(fig, update, frames=np.arange(steps), interval=interval)  # noqa
         anim.save(filename, dpi=dpi, writer='imagemagick')
-    return filename
+    return anim

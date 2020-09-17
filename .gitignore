@@ -1,12 +1,12 @@
 *.swp
 *.egg-info/
 *__pycache__/
+*.code-workspace
+*.ipynb
 .cache/
 .coverage
 htmlcov/
 .DS_Store
 .ipynb_checkpoints/
-.ipynb
-.vscode
-.mypy_cache
-.code-workspace
+.vscode/
+.mypy_cache/
