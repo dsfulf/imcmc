@@ -9,3 +9,4 @@ htmlcov/
 .ipynb
 .vscode
 .mypy_cache
+.code-workspace
